@@ -42,13 +42,34 @@ _JUDGE_COMPONENT = {"challenger": 1.0, "tie": 0.5, "baseline": 0.0}
 
 
 def load_solve(agent_file: str = "agent.py"):
+    """Load the ``solve`` entrypoint from ``agent_file``.
+
+    Every failure mode (missing file, directory, unloadable spec, import/exec error, missing or
+    non-callable ``solve``) raises ``RuntimeError`` with a clean one-line message instead of a
+    raw traceback, matching the artifact-CLI error convention and the ``(RuntimeError,
+    RepoSetError)`` catch in ``scripts/run_eval.py``.
+    """
+    if not os.path.exists(agent_file):
+        raise RuntimeError(f"agent file not found: {agent_file!r}")
+    if not os.path.isfile(agent_file):
+        raise RuntimeError(f"agent file is not a regular file: {agent_file!r}")
     root = os.path.dirname(os.path.abspath(agent_file))
     if root not in sys.path:
         sys.path.insert(0, root)
     spec = importlib.util.spec_from_file_location("vanguarstew_entry", agent_file)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load agent file {agent_file!r}: not a loadable Python module")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.solve
+    try:
+        spec.loader.exec_module(module)
+    except Exception as exc:
+        raise RuntimeError(f"cannot load agent file {agent_file!r}: {exc}") from exc
+    solve = getattr(module, "solve", None)
+    if not callable(solve):
+        raise RuntimeError(
+            f"agent file {agent_file!r} does not define a callable 'solve' entrypoint"
+        )
+    return solve
 
 
 # Backwards-compatible alias; opponents now live in benchmark.baselines.
